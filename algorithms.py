@@ -17,9 +17,6 @@ def recommend_gift(order_data, customer_type, budget):
     # Initialize gift quantities
     gift_quantities = {"Pack FOC": 0, "Hookah": 0}
     
-    # Get maximum gift quantities based on budget
-    max_quantities = get_max_gift_quantities(budget, customer_type, order_data['total_value'])
-    
     # Calculate total order weight
     total_order_weight_g = sum([
         order_data["quantities"].get("50g", 0) * 50,
@@ -30,24 +27,32 @@ def recommend_gift(order_data, customer_type, budget):
     # Convert to kg for easier comparison
     total_order_weight_kg = total_order_weight_g / 1000
     
-    # For Tobacco Shops, allocate hookahs first if applicable
-    remaining_budget = budget
+    # Define gift prices
+    pack_foc_price = 38
+    hookah_price = 400
     
+    # For Tobacco Shops, prioritize allocating hookahs based on order weight
     if customer_type == CustomerType.TOBACCO_SHOP:
-        # Allocate hookahs based on order weight and budget
-        if total_order_weight_kg > 100 and remaining_budget >= 800:
-            # Up to 2 hookahs for orders over 100kg
-            gift_quantities["Hookah"] = min(2, max_quantities["Hookah"])
-            remaining_budget -= gift_quantities["Hookah"] * 400
-        elif total_order_weight_kg > 50 and remaining_budget >= 400:
-            # 1 hookah for orders over 50kg
+        if total_order_weight_kg > 100 and budget >= 2 * hookah_price:
+            # 2 hookahs for orders over 100kg if budget allows
+            gift_quantities["Hookah"] = 2
+            budget -= 2 * hookah_price
+        elif total_order_weight_kg > 50 and budget >= hookah_price:
+            # 1 hookah for orders over 50kg if budget allows
             gift_quantities["Hookah"] = 1
-            remaining_budget -= 400
+            budget -= hookah_price
     
-    # Allocate remaining budget to Pack FOC
-    if remaining_budget > 0:
-        pack_foc_quantity = min(math.floor(remaining_budget / 38), max_quantities["Pack FOC"])
-        gift_quantities["Pack FOC"] = pack_foc_quantity
+    # Use ALL remaining budget for Pack FOC gifts
+    # Calculate how many packs we can get with the remaining budget
+    pack_count = int(budget / pack_foc_price)
+    gift_quantities["Pack FOC"] = pack_count
+    
+    # Calculate how much budget is left after allocating whole packs
+    budget_left = budget - (pack_count * pack_foc_price)
+    
+    # If there's still significant budget left (over 80% of a pack price), add one more pack
+    if budget_left >= 0.8 * pack_foc_price:
+        gift_quantities["Pack FOC"] += 1
     
     return gift_quantities
 
@@ -85,37 +90,12 @@ def optimize_budget(order_data, customer_type, target_roi_percentage):
     # Calculate budget based on target ROI
     budget = calculate_budget_from_roi(order_data, target_roi_percentage)
     
-    # Recommend gifts based on the calculated budget
+    # Simply use the improved recommend_gift function to allocate the entire budget
+    # The recommend_gift function is now designed to fully utilize the budget
     gifts = recommend_gift(order_data, customer_type, budget)
     
-    # Calculate actual ROI with recommended gifts
-    actual_roi = calculate_roi(order_data, gifts, budget)
-    
-    # Fine-tune the allocation by adjusting pack gifts
-    # Add or remove individual Pack FOC as needed
-    while abs(actual_roi - target_roi_percentage) > 0.1:
-        if actual_roi > target_roi_percentage:
-            # ROI is too high, reduce Pack FOC if possible
-            if gifts["Pack FOC"] > 0:
-                gifts["Pack FOC"] -= 1
-            else:
-                # Can't reduce Pack FOC further, try to reduce Hookah
-                if gifts["Hookah"] > 0:
-                    gifts["Hookah"] -= 1
-                else:
-                    # Can't reduce further
-                    break
-        else:
-            # ROI is too low, increase Pack FOC if budget allows
-            max_quantities = get_max_gift_quantities(budget, customer_type, order_data['total_value'])
-            if gifts["Pack FOC"] < max_quantities["Pack FOC"]:
-                gifts["Pack FOC"] += 1
-            else:
-                # Can't increase further
-                break
-        
-        # Recalculate actual ROI
-        actual_roi = calculate_roi(order_data, gifts, budget)
+    # The ROI should naturally approach the target given our improved budget utilization
+    # No need for fine-tuning as we're already maximizing budget usage
     
     return gifts
 

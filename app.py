@@ -248,12 +248,33 @@ def main():
     # Order input section
     st.header("Order Information")
 
-    # Customer type selection
+    # Customer type selection with reset callback
+    def reset_on_customer_type_change():
+        # Clear gift calculations when customer type changes
+        if 'original_gifts' in st.session_state:
+            del st.session_state['original_gifts']
+        if 'custom_gifts' in st.session_state:
+            del st.session_state['custom_gifts']
+        if 'applied_custom_gifts' in st.session_state:
+            del st.session_state['applied_custom_gifts']
+        if 'custom_pack_foc' in st.session_state:
+            del st.session_state['custom_pack_foc']
+        if 'custom_hookah' in st.session_state:
+            del st.session_state['custom_hookah']
+    
+    # Get current index
+    current_index = 0
+    if 'customer_type' in st.session_state:
+        if st.session_state.customer_type == CustomerType.TOBACCO_SHOP:
+            current_index = 1
+    
     customer_type_str = st.radio(
         "Customer Type",
         ["Retailer", "Tobacco Shop"],
-        index=0,
-        horizontal=True
+        index=current_index,
+        horizontal=True,
+        key="customer_type_radio",
+        on_change=reset_on_customer_type_change
     )
     customer_type = CustomerType.RETAILER if customer_type_str == "Retailer" else CustomerType.TOBACCO_SHOP
     
@@ -266,14 +287,31 @@ def main():
     # Create 3 columns for the 3 package sizes
     col1, col2, col3 = st.columns(3)
 
+    # Define callback functions to reset calculations when quantities change
+    def reset_on_qty_change():
+        # Clear gift calculations when quantities change
+        if 'original_gifts' in st.session_state:
+            del st.session_state['original_gifts']
+        if 'custom_gifts' in st.session_state:
+            del st.session_state['custom_gifts']
+        if 'applied_custom_gifts' in st.session_state:
+            del st.session_state['applied_custom_gifts']
+        if 'custom_pack_foc' in st.session_state:
+            del st.session_state['custom_pack_foc']
+        if 'custom_hookah' in st.session_state:
+            del st.session_state['custom_hookah']
+    
     with col1:
-        qty_50g = st.number_input("50g Packs", min_value=0, value=0, step=1)
+        qty_50g = st.number_input("50g Packs", min_value=0, value=0, step=1, 
+                                  key="qty_50g", on_change=reset_on_qty_change)
 
     with col2:
-        qty_250g = st.number_input("250g Packs", min_value=0, value=0, step=1)
+        qty_250g = st.number_input("250g Packs", min_value=0, value=0, step=1, 
+                                  key="qty_250g", on_change=reset_on_qty_change)
 
     with col3:
-        qty_1kg = st.number_input("1kg Packs", min_value=0, value=0, step=1)
+        qty_1kg = st.number_input("1kg Packs", min_value=0, value=0, step=1, 
+                                 key="qty_1kg", on_change=reset_on_qty_change)
 
     # Create order quantities dictionary
     quantities = {
@@ -402,6 +440,58 @@ def main():
             original_gift_values
         )
         
+        # Add a prominent save order button right after the recommendation
+        save_col1, save_col2 = st.columns([1, 2])
+        with save_col1:
+            if st.button("💾 Save Order", key="save_recommended_order", type="primary"):
+                try:
+                    # Get customer information
+                    customer_name = st.session_state.customer_name
+                    customer_address = st.session_state.customer_address
+                    customer_type_str = "Tobacco Shop" if customer_type == CustomerType.TOBACCO_SHOP else "Retailer"
+                    
+                    # Use the recommended gifts
+                    current_gifts = st.session_state.original_gifts
+                    # Calculate total weight directly from quantities
+                    total_grams = sum([
+                        order_data["quantities"].get("50g", 0) * 50,
+                        order_data["quantities"].get("250g", 0) * 250,
+                        order_data["quantities"].get("1kg", 0) * 1000
+                    ])
+                    
+                    # Save to database
+                    order_id = save_order(
+                        customer_name=customer_name,
+                        customer_address=customer_address,
+                        customer_type=customer_type_str,
+                        total_order_value=order_data['total_value'],
+                        quantities=order_data['quantities'],
+                        prices=order_data['prices'],
+                        total_weight_g=total_grams,
+                        eligible_tier=eligible_tier,
+                        roi_percentage=target_roi,
+                        budget=budget,
+                        gifts=current_gifts
+                    )
+                    
+                    # Show success message
+                    st.success(f"Order saved successfully with ID: {order_id}. View it in the Order History page.")
+                    
+                    # Reset calculation
+                    reset_all_calculations()
+                    
+                    # Rerun to update UI
+                    st.rerun()
+                    
+                except ValueError as e:
+                    # Special handling for database table errors
+                    st.error(str(e))
+                    st.info("To use database functionality, you need to create the required tables in Supabase. Check the console for SQL statements.")
+                except Exception as e:
+                    st.error(f"Error saving order: {str(e)}")
+        with save_col2:
+            st.info("💡 Save this order with the recommended gift allocation, or customize below.")
+        
         # Custom gift allocation section
         st.header("Custom Gift Allocation")
         st.write("Adjust gift quantities below to customize the offer:")
@@ -497,6 +587,13 @@ def main():
                     # Get the currently applied gifts (either original or custom)
                     current_gifts = st.session_state.custom_gifts if st.session_state.get('applied_custom_gifts', False) else st.session_state.original_gifts
                     
+                    # Calculate total weight directly from quantities
+                    total_grams = sum([
+                        order_data["quantities"].get("50g", 0) * 50,
+                        order_data["quantities"].get("250g", 0) * 250,
+                        order_data["quantities"].get("1kg", 0) * 1000
+                    ])
+                    
                     # Save to database
                     order_id = save_order(
                         customer_name=customer_name,
@@ -521,6 +618,10 @@ def main():
                     # Rerun to update UI
                     st.rerun()
                     
+                except ValueError as e:
+                    # Special handling for database table errors
+                    st.error(str(e))
+                    st.info("To use database functionality, you need to create the required tables in Supabase. Check the console for SQL statements.")
                 except Exception as e:
                     st.error(f"Error saving order: {str(e)}")
 

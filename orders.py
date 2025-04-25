@@ -40,8 +40,18 @@ def main():
         
         with col1:
             # Date range filter
-            min_date = df["Date"].min().date()
-            max_date = df["Date"].max().date()
+            # First ensure we have datetime objects
+            try:
+                df["Date"] = pd.to_datetime(df["Date"])
+                
+                # Get min and max dates
+                min_date = df["Date"].min().date()
+                max_date = df["Date"].max().date()
+            except:
+                # Fallback to today's date if there's an issue
+                today = datetime.now().date()
+                min_date = today
+                max_date = today
             
             date_range = st.date_input(
                 "Date Range",
@@ -52,8 +62,15 @@ def main():
             
             if len(date_range) == 2:
                 start_date, end_date = date_range
-                mask = (df["Date"].dt.date >= start_date) & (df["Date"].dt.date <= end_date)
-                df_filtered = df.loc[mask]
+                try:
+                    # Ensure Date is a datetime type
+                    if not pd.api.types.is_datetime64_any_dtype(df["Date"]):
+                        df["Date"] = pd.to_datetime(df["Date"])
+                    mask = (df["Date"].dt.date >= start_date) & (df["Date"].dt.date <= end_date)
+                    df_filtered = df.loc[mask]
+                except:
+                    # If date filtering fails, just return all data
+                    df_filtered = df
             else:
                 df_filtered = df
         
@@ -113,13 +130,22 @@ def main():
             
         with tab3:
             # Create a line chart for orders over time
-            df_filtered["Date"] = pd.to_datetime(df_filtered["Date"]).dt.date
-            orders_by_date = df_filtered.groupby("Date").agg({
-                "Order Value": "sum",
-                "Total Gift Value": "sum",
-                "Order ID": "count"
-            }).reset_index()
-            orders_by_date.rename(columns={"Order ID": "Number of Orders"}, inplace=True)
+            try:
+                # Ensure Date is a datetime type
+                if not pd.api.types.is_datetime64_any_dtype(df_filtered["Date"]):
+                    df_filtered["Date"] = pd.to_datetime(df_filtered["Date"])
+                df_filtered_copy = df_filtered.copy()
+                df_filtered_copy["Date"] = df_filtered_copy["Date"].dt.date
+                orders_by_date = df_filtered_copy.groupby("Date").agg({
+                    "Order Value": "sum",
+                    "Total Gift Value": "sum",
+                    "Order ID": "count"
+                }).reset_index()
+                orders_by_date.rename(columns={"Order ID": "Number of Orders"}, inplace=True)
+            except Exception as e:
+                st.warning(f"Could not process date data for visualization: {str(e)}")
+                # Create an empty dataframe with the required columns
+                orders_by_date = pd.DataFrame(columns=["Date", "Order Value", "Total Gift Value", "Number of Orders"])
             
             fig3 = px.line(
                 orders_by_date,
@@ -149,13 +175,43 @@ def main():
         
         # Format the dataframe
         formatted_df = df_filtered[display_columns].copy()
-        formatted_df["Date"] = formatted_df["Date"].dt.strftime("%Y-%m-%d %H:%M")
+        
+        # Safely format the Date column
+        try:
+            if not pd.api.types.is_datetime64_any_dtype(formatted_df["Date"]):
+                formatted_df["Date"] = pd.to_datetime(formatted_df["Date"])
+            formatted_df["Date"] = formatted_df["Date"].dt.strftime("%Y-%m-%d %H:%M")
+        except Exception as e:
+            # If date formatting fails, keep it as is
+            st.warning(f"Could not format dates for display: {str(e)}")
+            
+        # Format the numeric columns
         formatted_df["Order Value"] = formatted_df["Order Value"].map("${:,.2f}".format)
         formatted_df["Total Gift Value"] = formatted_df["Total Gift Value"].map("${:,.2f}".format)
         formatted_df["ROI %"] = formatted_df["ROI %"].map("{:.2f}%".format)
         
         # Display the dataframe
         st.dataframe(formatted_df, use_container_width=True)
+        
+        # Add Excel export functionality
+        from app import create_excel_download_link
+        
+        st.markdown("### Export to Excel")
+        st.markdown("Download the filtered orders as an Excel file:")
+        
+        export_df = df_filtered.copy()
+        
+        # Safely format the Date column for export
+        try:
+            if not pd.api.types.is_datetime64_any_dtype(export_df["Date"]):
+                export_df["Date"] = pd.to_datetime(export_df["Date"])
+            export_df["Date"] = export_df["Date"].dt.strftime("%Y-%m-%d %H:%M")
+        except Exception as e:
+            # If date formatting fails, keep it as is
+            st.warning(f"Could not format dates for Excel export: {str(e)}")
+        
+        excel_link = create_excel_download_link(export_df, "al_fakher_orders.xlsx", "📊 Download Orders as Excel")
+        st.markdown(excel_link, unsafe_allow_html=True)
     
     except Exception as e:
         st.error(f"Error loading orders: {str(e)}")

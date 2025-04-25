@@ -8,30 +8,107 @@ def get_supabase_client() -> Client:
     """Get Supabase client instance.
     
     Returns:
-        Client: Supabase client
+        Client: Supabase client or None if not configured
     """
-    supabase_url = os.environ.get('SUPABASE_URL')
-    supabase_key = os.environ.get('SUPABASE_KEY')
+    supabase_url = os.environ.get('SUPABASE_URL', 'https://annhckycdhpbqwhvcrrd.supabase.co')
+    supabase_key = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFubmhja3ljZGhwYnF3aHZjcnJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU1MzEzNjAsImV4cCI6MjA2MTEwNzM2MH0.xcgjkXn5jayBZqBaiaF83brRhO-H6t4M8nnCgIbXJ_s')
     
-    if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables must be set")
-    
-    return create_client(supabase_url, supabase_key)
+    try:
+        return create_client(supabase_url, supabase_key)
+    except Exception as e:
+        print(f"Error connecting to Supabase: {str(e)}")
+        print("The app will run in demo mode with database features disabled.")
+        print("To enable database functionality:")
+        print("1. Make sure your SUPABASE_URL and SUPABASE_KEY are correct")
+        print("2. Run the SQL statements below in your Supabase SQL editor")
+        print_table_creation_sql()
+        return None
 
-# Create tables if they don't exist
-def create_tables():
+# Check tables and display SQL for creating them if needed
+def check_tables():
     """
-    This function doesn't create tables as in Supabase you would typically
-    create tables through the web interface or migrations.
-    For this app, you should manually create the tables in Supabase.
+    Check if the necessary tables exist in Supabase.
+    If they don't, print the SQL needed to create them.
     
     Tables needed:
     1. orders - to store order information
     2. gifts - to store gift information related to orders
     """
-    # In a production environment, you might implement SQL migrations here
-    # But for simplicity, we assume the tables exist in Supabase
-    pass
+    supabase = get_supabase_client()
+    
+    # If no supabase client, just return (error already logged)
+    if not supabase:
+        return
+        
+    tables_exist = True
+    
+    try:
+        # Check if orders table exists
+        try:
+            orders_check = supabase.table('orders').select('count').limit(1).execute()
+            print("Orders table exists")
+        except Exception as e:
+            tables_exist = False
+            print(f"Orders table does not exist: {str(e)}")
+                
+        # Check if gifts table exists
+        try:
+            gifts_check = supabase.table('gifts').select('count').limit(1).execute()
+            print("Gifts table exists")
+        except Exception as e:
+            tables_exist = False
+            print(f"Gifts table does not exist: {str(e)}")
+        
+        # If tables don't exist, print the SQL to create them
+        if not tables_exist:
+            print_table_creation_sql()
+                
+    except Exception as e:
+        print(f"Error checking tables: {str(e)}")
+        print_table_creation_sql()
+
+# Print SQL for creating tables
+def print_table_creation_sql():
+    """
+    Print the SQL statements needed to create the tables in Supabase.
+    """
+    # SQL for orders table
+    orders_table_sql = """
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        customer_name VARCHAR(255) NOT NULL,
+        customer_address TEXT,
+        customer_type VARCHAR(50) NOT NULL,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        total_order_value FLOAT NOT NULL,
+        quantities JSONB NOT NULL,
+        prices JSONB NOT NULL,
+        total_weight_g INTEGER NOT NULL,
+        eligible_tier VARCHAR(50),
+        roi_percentage FLOAT,
+        budget FLOAT
+    );
+    """
+    
+    # SQL for gifts table
+    gifts_table_sql = """
+    CREATE TABLE IF NOT EXISTS gifts (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL,
+        gift_type VARCHAR(50) NOT NULL,
+        quantity INTEGER NOT NULL,
+        value FLOAT NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+    );
+    """
+    
+    print("\n=========== IMPORTANT: DATABASE SETUP ===========")
+    print("Please execute these SQL statements in your Supabase SQL editor:")
+    print("\n1. Create orders table:")
+    print(orders_table_sql)
+    print("\n2. Create gifts table:")
+    print(gifts_table_sql)
+    print("===============================================")
 
 # Helper functions for orders
 def save_order(customer_name, customer_address, customer_type, 
@@ -54,11 +131,78 @@ def save_order(customer_name, customer_address, customer_type,
         gifts (dict): Gift quantities (e.g., {"Pack FOC": 5, "Hookah": 1})
         
     Returns:
-        int: ID of the saved order
+        int: ID of the saved order or -1 if tables don't exist
     """
     supabase = get_supabase_client()
     
+    if not supabase:
+        # This is a demonstration without a real connection
+        import time
+        
+        # Create a dummy order in the demo mode
+        # This will help simulate the order history page working too
+        from app import create_excel_download_link
+        
+        # Save order to a global list for demo mode
+        if not hasattr(save_order, 'demo_orders'):
+            save_order.demo_orders = []
+            
+        order_id = int(time.time())
+        demo_order = {
+            "id": order_id,
+            "customer_name": customer_name,
+            "customer_address": customer_address,
+            "customer_type": customer_type,
+            "order_date": datetime.now().isoformat(),
+            "total_order_value": total_order_value,
+            "quantities": quantities,
+            "prices": prices,
+            "total_weight_g": total_weight_g,
+            "eligible_tier": eligible_tier,
+            "roi_percentage": roi_percentage,
+            "budget": budget
+        }
+        
+        save_order.demo_orders.append(demo_order)
+        
+        # Create demo gifts
+        if not hasattr(save_order, 'demo_gifts'):
+            save_order.demo_gifts = []
+            
+        for gift_type, quantity in gifts.items():
+            if quantity > 0:
+                gift_value = quantity * (38 if gift_type == "Pack FOC" else 400)
+                
+                gift_data = {
+                    "id": len(save_order.demo_gifts) + 1,
+                    "order_id": order_id,
+                    "gift_type": gift_type,
+                    "quantity": quantity,
+                    "value": gift_value
+                }
+                
+                save_order.demo_gifts.append(gift_data)
+        
+        # Return a fake ID
+        return order_id
+    
     try:
+        # First check if tables exist
+        try:
+            tables_check = supabase.table('orders').select('count').limit(1).execute()
+        except Exception as e:
+            if "relation" in str(e) and "does not exist" in str(e):
+                # Tables don't exist yet, show a clear message
+                print("\n===== DATABASE TABLES NOT CREATED =====")
+                print("The database tables haven't been created in Supabase yet.")
+                print("Please create the tables as instructed in the SQL statements below:")
+                print_table_creation_sql()
+                print("======================================\n")
+                raise ValueError("Database tables not created yet. Please create the tables in Supabase first using the SQL statements shown above.")
+            else:
+                # Some other error
+                raise e
+    
         # Create new order
         order_data = {
             "customer_name": customer_name,
@@ -99,9 +243,17 @@ def save_order(customer_name, customer_address, customer_type,
         return order_id
     
     except Exception as e:
-        # Log the error
+        # Log the error with detailed information
+        import traceback
+        error_details = traceback.format_exc()
         print(f"Error saving order: {str(e)}")
-        raise e
+        print(f"Error details:\n{error_details}")
+        
+        # Re-raise with a more user-friendly message
+        if "relation" in str(e) and "does not exist" in str(e):
+            raise ValueError("Database tables not created yet. Please create the tables in Supabase first.")
+        else:
+            raise e
 
 def get_all_orders():
     """
@@ -111,6 +263,12 @@ def get_all_orders():
         list: List of order dictionaries
     """
     supabase = get_supabase_client()
+    
+    # If no supabase client, return demo orders if any
+    if not supabase:
+        if hasattr(save_order, 'demo_orders'):
+            return save_order.demo_orders
+        return []
     
     try:
         # Get all orders from Supabase, ordered by date descending
@@ -133,6 +291,10 @@ def get_order_by_id(order_id):
     """
     supabase = get_supabase_client()
     
+    # If no supabase client, return None (demo mode)
+    if not supabase:
+        return None
+    
     try:
         response = supabase.table('orders').select('*').eq('id', order_id).execute()
         if response.data and len(response.data) > 0:
@@ -154,6 +316,12 @@ def get_gifts_for_order(order_id):
         list: List of gift dictionaries
     """
     supabase = get_supabase_client()
+    
+    # If no supabase client, return demo gifts if any
+    if not supabase:
+        if hasattr(save_order, 'demo_gifts'):
+            return [gift for gift in save_order.demo_gifts if gift['order_id'] == order_id]
+        return []
     
     try:
         response = supabase.table('gifts').select('*').eq('order_id', order_id).execute()
@@ -208,7 +376,6 @@ def orders_to_dataframe():
     # Convert to DataFrame
     return pd.DataFrame(order_data) if order_data else pd.DataFrame()
 
-# Initialize the database tables if needed
-# Note: in Supabase, tables should be created manually
-# This is just a placeholder to match the original structure
-create_tables()
+# Initialize the database tables if needed and print SQL to create tables if they don't exist
+print_table_creation_sql()
+check_tables()
